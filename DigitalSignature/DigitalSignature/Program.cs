@@ -28,7 +28,7 @@ public sealed class Pkcs11Library
     public static IObjectHandle? GetPrivateKey(ISession session) =>
         FindFirstObject(session, new() { session.Factories.ObjectAttributeFactory.Create(CKA.CKA_CLASS, CKO.CKO_PRIVATE_KEY) });
 
-    public static ISlot? GetSignableSlot(
+    private static ISlot? GetSignableSlot(
         IPkcs11Library pkcs11Library,
         ulong slotId,
         string tokenSerialNumber) =>
@@ -83,12 +83,12 @@ public sealed class Pkcs11Library
         session.Logout();
 
         return signature;
-    }
 
-    private static ulong GetHashLength(byte[] data) =>
-        (ulong)SHA256.Create()
-                     .ComputeHash(data)
-                     .Length;
+        static ulong GetHashLength(byte[] data) =>
+            (ulong)SHA256.Create()
+                         .ComputeHash(data)
+                         .Length;
+    }
 
     public static string GetLog()
     {
