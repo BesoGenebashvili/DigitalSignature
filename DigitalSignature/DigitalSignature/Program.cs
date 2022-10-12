@@ -4,22 +4,67 @@ using System.Security.Cryptography;
 using System.Text;
 
 Console.WriteLine("Hello, World!");
-Console.WriteLine(Pkcs11Library.GetLog());
+Console.WriteLine(Pkcs11Library.GetMachineLog());
 
 public sealed class Pkcs11Library
 {
     private static readonly Pkcs11InteropFactories Factories = new();
     private static readonly string Pkcs11LibraryPath = @"D:\SoftHSM2\lib\softhsm2-x64.dll";
 
-    private static IObjectHandle? FindFirstObject(ISession session, List<IObjectAttribute> objectAttributes)
+    public static void GenerateKeyPair(
+        ISession session,
+        out IObjectHandle publicKeyHandle,
+        out IObjectHandle privateKeyHandle)
     {
-        session.FindObjectsInit(objectAttributes);
+        var ckaId = session.GenerateRandom(10); // Key identifier for public/private key pair
 
-        var foundObjects = session.FindObjects(1);
+        var attributeFactory = session.Factories.ObjectAttributeFactory;
 
-        session.FindObjectsFinal();
+        var publicKeyAttributes = new List<IObjectAttribute>()
+        {
+            attributeFactory.Create(CKA.CKA_TOKEN, true),
+            attributeFactory.Create(CKA.CKA_CLASS, CKO.CKO_PUBLIC_KEY),
+            attributeFactory.Create(CKA.CKA_PRIVATE, false),
+            attributeFactory.Create(CKA.CKA_LABEL, "Public-Key-DigitalSignature"),
+            attributeFactory.Create(CKA.CKA_ID, ckaId),
+            attributeFactory.Create(CKA.CKA_ENCRYPT, true),
+            attributeFactory.Create(CKA.CKA_VERIFY, true),
+            attributeFactory.Create(CKA.CKA_VERIFY_RECOVER, true),
+            attributeFactory.Create(CKA.CKA_WRAP, true),
+            attributeFactory.Create(CKA.CKA_MODULUS_BITS, 1024),
+            attributeFactory.Create(CKA.CKA_PUBLIC_EXPONENT, new byte[] { 0x01, 0x00, 0x01 })
+        };
 
-        return foundObjects.FirstOrDefault();
+        var privateKeyAttributes = new List<IObjectAttribute>()
+        {
+            attributeFactory.Create(CKA.CKA_TOKEN, true),
+            attributeFactory.Create(CKA.CKA_CLASS, CKO.CKO_PRIVATE_KEY),
+            attributeFactory.Create(CKA.CKA_PRIVATE, true),
+            attributeFactory.Create(CKA.CKA_LABEL, "Private-Key-DigitalSignature"),
+            attributeFactory.Create(CKA.CKA_ID, ckaId),
+            attributeFactory.Create(CKA.CKA_SENSITIVE, true),
+            attributeFactory.Create(CKA.CKA_DECRYPT, true),
+            attributeFactory.Create(CKA.CKA_SIGN, true),
+            attributeFactory.Create(CKA.CKA_SIGN_RECOVER, true),
+            attributeFactory.Create(CKA.CKA_UNWRAP, true)
+        };
+
+        var mechanism = session.Factories
+                               .MechanismFactory
+                               .Create(CKM.CKM_RSA_PKCS_KEY_PAIR_GEN);
+
+        session.GenerateKeyPair(
+            mechanism,
+            publicKeyAttributes,
+            privateKeyAttributes,
+            out publicKeyHandle,
+            out privateKeyHandle);
+    }
+
+    public static void DestroyPublicPrivateKeyPair(ISession session)
+    {
+        session.DestroyObject(GetPublicKey(session));
+        session.DestroyObject(GetPrivateKey(session));
     }
 
     public static IObjectHandle? GetPublicKey(ISession session) =>
@@ -27,20 +72,6 @@ public sealed class Pkcs11Library
 
     public static IObjectHandle? GetPrivateKey(ISession session) =>
         FindFirstObject(session, new() { session.Factories.ObjectAttributeFactory.Create(CKA.CKA_CLASS, CKO.CKO_PRIVATE_KEY) });
-
-    private static ISlot? GetSignableSlot(
-        IPkcs11Library pkcs11Library,
-        ulong slotId,
-        string tokenSerialNumber) =>
-        pkcs11Library.GetSlotList(SlotsType.WithTokenPresent)
-                     .FirstOrDefault(s =>
-                            s.GetTokenInfo()
-                             .SerialNumber
-                             .Equals(tokenSerialNumber, StringComparison.InvariantCulture)
-                         && s.SlotId
-                             .Equals(slotId)
-                         && s.GetMechanismList()
-                             .Any(m => s.GetMechanismInfo(m).MechanismFlags.Sign));
 
     public static byte[] Sign(
         byte[] data,
@@ -90,7 +121,7 @@ public sealed class Pkcs11Library
                          .Length;
     }
 
-    public static string GetLog()
+    public static string GetMachineLog()
     {
         using var library =
             Factories.Pkcs11LibraryFactory
@@ -139,4 +170,31 @@ public sealed class Pkcs11Library
                 return builder;
             })).ToString();
     }
+
+    private static IObjectHandle? FindFirstObject(
+        ISession session,
+        List<IObjectAttribute> objectAttributes)
+    {
+        session.FindObjectsInit(objectAttributes);
+
+        var foundObjects = session.FindObjects(1);
+
+        session.FindObjectsFinal();
+
+        return foundObjects.FirstOrDefault();
+    }
+
+    private static ISlot? GetSignableSlot(
+        IPkcs11Library pkcs11Library,
+        ulong slotId,
+        string tokenSerialNumber) =>
+        pkcs11Library.GetSlotList(SlotsType.WithTokenPresent)
+                     .FirstOrDefault(s =>
+                            s.GetTokenInfo()
+                             .SerialNumber
+                             .Equals(tokenSerialNumber, StringComparison.InvariantCulture)
+                         && s.SlotId
+                             .Equals(slotId)
+                         && s.GetMechanismList()
+                             .Any(m => s.GetMechanismInfo(m).MechanismFlags.Sign));
 }
